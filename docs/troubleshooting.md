@@ -38,3 +38,13 @@ Voicebot Gateway(VBGW) 운영 중 발생 가능한 문제와 해결 방법입니
 ### 3.2 수신 호 무응답
 - **현상**: INVITE 신호가 오지만 게이트웨이가 응답하지 않음.
 - **해결**: 게이트웨이가 SIP 포트(기본 5060)에서 Listen 중인지 `netstat -an`으로 확인하고, PBX 시스템에서 게이트웨이의 IP 정보가 올바르게 등록되었는지 점검하십시오.
+
+### 3.3 수신 호 즉시 거절 (486 Busy Here)
+- **현상**: INVITE 신호가 오자마자 게이트웨이가 `486 Busy Here`로 응답.
+- **해결**: 허용된 최대 동시 통화 수(`MAX_CONCURRENT_CALLS`)를 초과한 상태입니다. 시스템 자원에 여유가 있다면 환경 변수 `MAX_CONCURRENT_CALLS` 값을 상향 조정 후 재시작하세요.
+
+## 4. 로그 및 모니터링 (Logging & Observability)
+
+### 4.1 로그 레벨 조정
+- **현상**: 게이트웨이의 내부 동작(예: SIP 패킷 덤프, 상세 VAD 작동 내역)을 디버깅하고 싶은 경우.
+- **해결**: 환경 변수 `LOG_LEVEL=debug` 또는 `LOG_LEVEL=trace` 설정 후 재실행하십시오. (지원 레벨: trace, debug, info, warn, error, critical)

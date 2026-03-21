@@ -54,12 +54,17 @@ pip install -r requirements.txt
 
 게이트웨이는 환경 변수를 통해 PBX 등록 정보를 설정할 수 있습니다. 설정하지 않을 경우 로컬 모드(Direct IP Call)로 동작합니다.
 
-| 환경 변수 | 설명 | 예시 |
+| 환경 변수 | 설명 | 예시 (기본값) |
 | :--- | :--- | :--- |
 | `PBX_URI` | PBX 서버 Registrar URI | `sip:192.168.1.100` |
 | `PBX_ID_URI` | PBX 등록 ID URI | `sip:1001@192.168.1.100` |
 | `PBX_USERNAME` | PBX 인증 사용자 아이디 | `1001` |
 | `PBX_PASSWORD` | PBX 인증 비밀번호 | `password123` |
+| `AI_ENGINE_ADDR` | AI STT/TTS gRPC 서버 주소 | `localhost:50051` |
+| `MAX_CONCURRENT_CALLS` | 최대 동시 허용 채널 수 | `100` |
+| `LOG_LEVEL` | 애플리케이션 로그 레벨 | `info` |
+
+> 💡 **Tip:** `config/.env.example` 파일을 복사하여 `.env`를 생성하고 적용(`source .env`)하면 편리합니다.
 
 ## 🧪 테스트 방법 (Testing Guide)
 
