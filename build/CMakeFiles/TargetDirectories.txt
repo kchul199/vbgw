@@ -1,0 +1,3 @@
+/Users/kchul199/Desktop/project/antigravity_project/vbgw/build/CMakeFiles/vbgw.dir
+/Users/kchul199/Desktop/project/antigravity_project/vbgw/build/CMakeFiles/edit_cache.dir
+/Users/kchul199/Desktop/project/antigravity_project/vbgw/build/CMakeFiles/rebuild_cache.dir
