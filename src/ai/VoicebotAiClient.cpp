@@ -1,3 +1,4 @@
+#include <spdlog/spdlog.h>
 #include "VoicebotAiClient.h"
 #include <iostream>
 
@@ -113,7 +114,7 @@ void VoicebotAiClient::readWorker() {
         }
         else if (response.type() == AiResponse::END_OF_TURN) {
             if (response.clear_buffer() && on_tts_clear_) {
-                std::cout << "🚨 [Barge-In] Flushed Gateway TTS RingBuffer!" << std::endl;
+                spdlog::warn("🚨 [Barge-In] Flushed Gateway TTS RingBuffer!");
                 on_tts_clear_();
             }
         }

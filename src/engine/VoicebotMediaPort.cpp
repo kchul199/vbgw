@@ -1,3 +1,4 @@
+#include <spdlog/spdlog.h>
 #include "VoicebotMediaPort.h"
 #include "../utils/RingBuffer.h"
 #include "../ai/VoicebotAiClient.h"

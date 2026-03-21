@@ -6,8 +6,15 @@
 #include <chrono>
 #include <csignal>
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/daily_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/rotating_file_sink.h>
 #include <atomic>
+#include <filesystem>
+#include <iomanip>
+#include <sstream>
 
+// 전역 종료 플래그 (SIGINT 등 인터럽트 기반 안전 종료 대기용)
 std::atomic<bool> keep_running(true);
 
 void signalHandler(int signum) {
@@ -58,11 +65,11 @@ int main() {
         acc.create(acc_cfg);
         spdlog::info("Voicebot Account created. Listening or Registered to PBX successfully!");
     } catch(pj::Error& err) {
-        std::cerr << "Error creating account: " << err.info() << std::endl;
+        spdlog::error("Error creating account: {}", err.info());
         return 1;
     }
 
-    std::cout << "Press Ctrl+C to stop the gateway gracefully." << std::endl;
+    spdlog::info("Press Ctrl+C to stop the gateway gracefully.");
 
     // 데몬 루프
     while (keep_running) {
@@ -72,7 +79,7 @@ int main() {
     }
 
     // 1. 진행 중인 모든 통화 강제 종료 (PBX에 BYE 전송)
-    std::cout << "[Shutdown 1/3] Hanging up all active calls..." << std::endl;
+    spdlog::info("[Shutdown 1/3] Hanging up all active calls...");
     SessionManager::getInstance().hangupAllCalls();
 
     // 네트워크 상으로 BYE 패킷이 안전하게 전송될 시간을 확보
@@ -84,13 +91,13 @@ int main() {
     }
 
     // 2. 로컬 SIP 포트 닫기 및 계정 정리
-    std::cout << "[Shutdown 2/3] Destroying account..." << std::endl;
+    spdlog::info("[Shutdown 2/3] Destroying account...");
     acc.modify(acc_cfg); // 내부 자원 회수 유도
 
     // 3. PJSIP 엔진 완벽히 내리기
-    std::cout << "[Shutdown 3/3] Shutting down PJLIB..." << std::endl;
+    spdlog::info("[Shutdown 3/3] Shutting down PJLIB...");
     ep.shutdown();
 
-    std::cout << "Gateway shutdown complete. Goodbye!" << std::endl;
+    spdlog::info("Gateway shutdown complete. Goodbye!");
     return 0;
 }

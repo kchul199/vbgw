@@ -1,3 +1,4 @@
+#include <spdlog/spdlog.h>
 #include "VoicebotCall.h"
 #include "VoicebotMediaPort.h"
 #include "SessionManager.h"
@@ -53,7 +54,7 @@ void VoicebotCall::onCallMediaState(OnCallMediaStateParam &prm) {
                 });
                 
                 ai_client_->setErrorCallback([this](const std::string& err) {
-                    std::cerr << "🚨 [Call] Hanging up due to AI Error: " << err << std::endl;
+                    spdlog::error("🚨 [Call] Hanging up due to AI Error: {}", err);
                     // AI 서버 장애 시 통화 강제 종류 (503 Service Unavailable)
                     try {
                         pj::CallOpParam prm;

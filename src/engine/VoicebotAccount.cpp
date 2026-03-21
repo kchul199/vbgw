@@ -1,3 +1,4 @@
+#include <spdlog/spdlog.h>
 #include "VoicebotAccount.h"
 #include "VoicebotCall.h"
 #include "SessionManager.h"
@@ -15,11 +16,11 @@ void VoicebotAccount::onRegState(OnRegStateParam &prm) {
 }
 
 void VoicebotAccount::onIncomingCall(OnIncomingCallParam &iprm) {
-    std::cout << "\nIncoming SIP call from Call-ID: " << iprm.callId << std::endl;
+    spdlog::info("Incoming SIP call from Call-ID: {}", iprm.callId);
     
     // 1. 최대 채널 수 제한 확인 (OOM 및 리소스 낭비 방지)
     if (!SessionManager::getInstance().canAcceptCall()) {
-        std::cout << "[방어 로직] 최대 허용 콜 수를 초과했습니다. 호를 거절(486)합니다." << std::endl;
+        spdlog::warn("[방어 로직] 최대 허용 콜 수를 초과했습니다. 호를 거절(486)합니다.");
         VoicebotCall rejected_call(*this, iprm.callId);
         CallOpParam prm;
         prm.statusCode = PJSIP_SC_BUSY_HERE; // 486 Busy Here (거절)
@@ -36,7 +37,7 @@ void VoicebotAccount::onIncomingCall(OnIncomingCallParam &iprm) {
     try {
         call->answer(prm);
     } catch(Error& err) {
-        std::cerr << "Failed to answer call: " << err.info() << std::endl;
+        spdlog::error("Failed to answer call: {}", err.info());
         SessionManager::getInstance().removeCall(iprm.callId);
     }
 }
