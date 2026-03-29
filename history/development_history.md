@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-03-29
+
+- `[5774726]` **refactor: 아키텍처 리뷰 Critical~Low 20건 이슈 개선** — 2026-03-29 22:08 (25 파일, +2013/-433)
+  - 변경: .clang-format,.gitignore,CLAUDE.md,Dockerfile,docs/architecture.md,docs/testing.md,protos/voicebot.proto,src/ai/SileroVad.cpp,src/ai/SileroVad.h,src/ai/VoicebotAiClient.cpp
+## 2026-03-22
+
+- `[9f64764]` **Docs: enhance README.md to be highly detailed and beginner-friendly** — 2026-03-22 22:36 (1 파일, +117/-80)
+  - 변경: README.md
 ## 📅 프로젝트 개발 연혁
 
 ### 1단계: 기본 인프라 및 핵심 엔진 구축 (Phase 1)

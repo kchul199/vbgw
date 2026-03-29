@@ -43,9 +43,12 @@ src/emulator/voicebot_pb2_grpc.py
 # models/ 폴더는 필요 시 LFS 또는 별도 스토리지 사용
 # models/*.onnx  ← 현재는 추적 (소규모), 필요 시 주석 해제
 
-# ── IDE / 에디터 ──────────────────────────────────────────────
+# ── IDE / 에디터 / 로컬 도구 ──────────────────────────────────────
 .vscode/
 .idea/
+.cache/
+.claude/
+CLAUDE.md
 *.swp
 *.swo
 *~
