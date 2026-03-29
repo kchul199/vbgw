@@ -6,7 +6,10 @@ Voicebot Gateway(VBGW) 운영 중 발생 가능한 문제와 해결 방법입니
 
 ### 1.1 ONNX Runtime 라이브러리 미인식
 - **현상**: `find_package` 또는 `find_library`에서 `onnxruntime`을 찾지 못함.
-- **해결**: `CMakeLists.txt`에서 `onnxruntime` 경로가 `/opt/homebrew/lib` (M칩 맥 기준)으로 설정되어 있는지 확인하십시오. 다른 경로에 설치된 경우 `PATHS`를 수정해야 합니다.
+- **해결**: 최신 빌드 시스템은 `/opt/homebrew`나 `/usr/local`과 같은 표준 경로를 자동 탐색합니다. 직접 컴파일했거나 특수한 경로에 설치한 경우에는 CMake 실행 시 힌트를 제공하십시오:
+```bash
+  cmake -DCMAKE_INCLUDE_PATH=/custom/onnx/include -DCMAKE_LIBRARY_PATH=/custom/onnx/lib ..
+```
 
 ### 1.2 PJSIP(PJPROJECT) 의존성 오류
 - **현상**: 컴파일 시 `pjsua.h` 헤더를 찾을 수 없음.

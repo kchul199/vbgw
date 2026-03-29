@@ -88,8 +88,11 @@ graph TD
 4.  **VAD 버퍼링 및 추론 (ONNX)**: 16kHz PCM 데이터를 512 샘플(32ms) 단위로 내부 버퍼링하여 ONNX 런타임에서 Silero VAD 추론을 수행, 화자 발화 여부(`is_speaking`)를 판단합니다.
 5.  **gRPC 스트리밍 (AI 전송)**: 버퍼링된 16kHz 오디오 데이터와 VAD 추론 결과(`is_speaking`)를 `AudioChunk`에 담아 AI 엔진(STT 등)으로 스트리밍 전송합니다.
 
-## 6. 특화 성능 및 고려사항 (Technical Considerations)
+## 6. 특화 성능 및 핵심 아키텍처 (Technical Considerations)
 
-1.  **Zero-Copy RingBuffer:** `std::mutex`와 `std::condition_variable`을 활용한 커스텀 RingBuffer를 통해 미디어 워커 스레드와 gRPC 스트리밍 스레드 간의 데이터 교환 지연을 최소화합니다.
-2.  **Fault Tolerance:** gRPC 스트림 단절 시 `VoicebotAiClient`에서 감지하여 콜 세션을 안전하게 정리하거나 재연결을 시도하는 로직이 상위 `VoicebotCall` 레벨에서 관리됩니다.
-3.  **Resource Management:** `SessionManager`를 통해 동시 호 수를 제한하여 CPU 및 메모리 자원 고갈을 방지합니다. (Default Max: 100 Calls)
+1.  **gRPC Channel Pooling (채널 공유)**: `AppConfig` 싱글톤을 활용하여 게이트웨이 시작 시 단일 gRPC 채널을 생성하고 모든 콜이 이를 공유합니다. 이는 매 통화마다 발생하는 값비싼 TCP/TLS 핸드셰이크를 제거하여, 100콜 이상의 대규모 동시 접근 시에도 병목 없이 안정적인 AI 스트리밍을 제공합니다.
+2.  **통합 설정 가시화 (AppConfig)**: PJSIP의 딥 콜백(Deep Callback) 체인 내부에서 산발적으로 호출되던 `getenv()` 시스템 콜을 모두 제거하고, 시작 시 `AppConfig`에 1회 캐싱하여 읽기 전용으로 접근함으로써 Hot-path 블로킹 위험을 차단했습니다.
+3.  **UUID v4 기반 세션 트레이싱**: PJSIP에서 재사용되는 정수형 Call-ID 대신 UUID 기반의 고유 Session ID를 채택하여, 클라우드 분산 환경(ELK/Grafana)에서 콜 생애주기(Call Lifecycle)부터 AI 추론 로그까지 일관되게 추적(Tracing)할 수 있습니다.
+4.  **Zero-Copy RingBuffer:** `std::mutex`와 `std::condition_variable`을 활용한 커스텀 RingBuffer를 통해 미디어 워커 스레드와 gRPC 스트리밍 스레드 간의 데이터 교환 오버헤드를 최소화합니다.
+5.  **Fault Tolerance:** gRPC 스트림 단절 시 `VoicebotAiClient`에서 감지하여 콜 세션을 안전하게 연결 해제하거나 백오프 재연결을 시도하는 로직이 상위 `VoicebotCall` 레벨에서 관리됩니다.
+6.  **Resource Management:** `SessionManager`를 통해 동시 호 수를 논리적으로 제한하여 CPU 및 메모리 자원의 고갈(OOM)을 방지합니다. (Default Max: 100 Calls)

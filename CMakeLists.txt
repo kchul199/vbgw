@@ -16,7 +16,17 @@ find_package(Boost REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_library(ONNXRUNTIME_LIB onnxruntime PATHS /opt/homebrew/lib REQUIRED)
+find_library(ONNXRUNTIME_LIB 
+    NAMES onnxruntime 
+    PATHS /opt/homebrew/lib /usr/local/lib /usr/lib /opt/onnxruntime/lib
+    REQUIRED)
+
+# ONNX Runtime 헤더 탐색 추가
+find_path(ONNXRUNTIME_INCLUDE_DIR 
+    NAMES onnxruntime_cxx_api.h 
+    PATHS /opt/homebrew/include/onnxruntime /usr/local/include/onnxruntime /usr/include/onnxruntime
+    REQUIRED)
+
 find_package(spdlog REQUIRED)
 
 find_program(PROTOC_EXECUTABLE protoc)
@@ -59,12 +69,15 @@ target_include_directories(vbgw PRIVATE
     ${PJPROJECT_INCLUDE_DIRS}
     src/
     ${PROTO_GEN_DIR}
-    /opt/homebrew/include/onnxruntime
+    ${ONNXRUNTIME_INCLUDE_DIR}
 )
+
+# OpenSSL 라이브러리 경로 추출 (macOS 등 비표준 경로 대비)
+get_filename_component(OPENSSL_LIB_DIR ${OPENSSL_SSL_LIBRARY} DIRECTORY)
 
 # 4. 컴파일 옵션 및 라이브러리 링크
 target_compile_options(vbgw PRIVATE ${PJPROJECT_CFLAGS_OTHER})
-target_link_directories(vbgw PRIVATE ${PJPROJECT_LIBRARY_DIRS} /opt/homebrew/opt/openssl@3/lib /opt/homebrew/lib)
+target_link_directories(vbgw PRIVATE ${PJPROJECT_LIBRARY_DIRS} ${OPENSSL_LIB_DIR})
 
 execute_process(COMMAND pkg-config --static --libs libpjproject
                 OUTPUT_VARIABLE PJ_RAW_LDFLAGS
