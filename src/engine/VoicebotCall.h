@@ -1,19 +1,31 @@
 #pragma once
 #include <pjsua2.hpp>
+
 #include <memory>
+#include <mutex>
+#include <string>
 
 class VoicebotAiClient;
 class VoicebotMediaPort;
 
-class VoicebotCall : public pj::Call {
+// [M-1 Fix] enable_shared_from_this 상속 추가
+// 콜백 Lambda에서 this 대신 weak_from_this()를 사용하여 dangling pointer 방지
+class VoicebotCall : public pj::Call, public std::enable_shared_from_this<VoicebotCall>
+{
 public:
-    VoicebotCall(pj::Account &acc, int call_id = PJSUA_INVALID_ID);
-    ~VoicebotCall(); // unique_ptr 소멸자는 cpp에서 완전 타입 필요
+    VoicebotCall(pj::Account& acc, int call_id = PJSUA_INVALID_ID);
+    ~VoicebotCall();
 
-    virtual void onCallState(pj::OnCallStateParam &prm) override;
-    virtual void onCallMediaState(pj::OnCallMediaStateParam &prm) override;
+    virtual void onCallState(pj::OnCallStateParam& prm) override;
+    virtual void onCallMediaState(pj::OnCallMediaStateParam& prm) override;
 
 private:
-    std::unique_ptr<VoicebotMediaPort> media_port_; // RAII - raw pointer 제거
+    std::unique_ptr<VoicebotMediaPort> media_port_;
     std::shared_ptr<VoicebotAiClient> ai_client_;
+
+    // [H-1 Fix] ai_client_ 초기화 이중 진입 방지
+    std::mutex ai_init_mutex_;
+
+    // [M-9 Fix] UUID 기반 세션 ID — 분산 환경에서 로그 추적 가능
+    std::string session_id_;
 };

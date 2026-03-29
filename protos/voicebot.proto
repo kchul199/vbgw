@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package voicebot.ai;
 
+// [L-4 Fix] C++ Arena Allocation 최적화 — protobuf 객체 힙 할당 횟수 감소
+option cc_enable_arenas = true;
+
+
 // 통화 세션 중 AI 엔진과 실시간(Real-time)으로 통신하기 위한 양방향 스트리밍 서비스
 service VoicebotAiService {
     rpc StreamSession(stream AudioChunk) returns (stream AiResponse);

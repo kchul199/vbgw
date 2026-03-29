@@ -1,29 +1,45 @@
 #pragma once
-#include <unordered_map>
-#include <memory>
-#include <mutex>
-#include <cstdlib>
+#include "../utils/AppConfig.h"
 #include "VoicebotCall.h"
 
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+
 // 싱글톤 기반의 쓰레드 세이프 콜 라이프사이클 관리자
-class SessionManager {
+class SessionManager
+{
 public:
-    static SessionManager& getInstance() {
+    static SessionManager& getInstance()
+    {
         static SessionManager instance;
         return instance;
     }
 
-    void addCall(int call_id, std::shared_ptr<VoicebotCall> call) {
+    void addCall(int call_id, std::shared_ptr<VoicebotCall> call)
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         calls_[call_id] = call;
     }
 
-    void removeCall(int call_id) {
+    // [Phase3-M1 Fix] TOCTOU 방지 — 원자적 확인+추가
+    bool tryAddCall(int call_id, std::shared_ptr<VoicebotCall> call)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (calls_.size() >= static_cast<size_t>(max_calls_))
+            return false;
+        calls_[call_id] = call;
+        return true;
+    }
+
+    void removeCall(int call_id)
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         calls_.erase(call_id);
     }
 
-    std::shared_ptr<VoicebotCall> getCall(int call_id) {
+    std::shared_ptr<VoicebotCall> getCall(int call_id)
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = calls_.find(call_id);
         if (it != calls_.end()) {
@@ -32,19 +48,21 @@ public:
         return nullptr;
     }
 
-    // [P5 Fix] 최대 동시 채널 수를 환경 변수(MAX_CONCURRENT_CALLS)에서 읽음
-    bool canAcceptCall() {
+    bool canAcceptCall()
+    {
         std::lock_guard<std::mutex> lock(mutex_);
-        return calls_.size() < static_cast<size_t>(getMaxCalls());
+        return calls_.size() < static_cast<size_t>(max_calls_);
     }
 
-    size_t getActiveCallCount() {
+    size_t getActiveCallCount()
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         return calls_.size();
     }
 
     // 데몬 종료 시 모든 활성 통화 일괄 종료 (Deadlock 방지 위해 복사 후 순회)
-    void hangupAllCalls() {
+    void hangupAllCalls()
+    {
         std::vector<std::shared_ptr<VoicebotCall>> active_calls;
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -57,25 +75,19 @@ public:
                 pj::CallOpParam prm;
                 prm.statusCode = PJSIP_SC_DECLINE;
                 call->hangup(prm);
-            } catch(...) {}
+            } catch (...) {}
         }
     }
 
 private:
-    SessionManager() = default;
+    // [H-6 Fix] AppConfig 싱글톤에서 캐싱된 값 사용
+    // 기존의 getenv()+stoi() 반복 수행 제거
+    SessionManager() : max_calls_(AppConfig::instance().max_concurrent_calls) {}
     ~SessionManager() = default;
     SessionManager(const SessionManager&) = delete;
     SessionManager& operator=(const SessionManager&) = delete;
 
-    // 환경 변수에서 최대 채널 수 읽기 (기본값: 100)
-    static int getMaxCalls() {
-        const char* env = std::getenv("MAX_CONCURRENT_CALLS");
-        if (env) {
-            try { return std::stoi(env); } catch (...) {}
-        }
-        return 100;
-    }
-
+    const int max_calls_;
     std::unordered_map<int, std::shared_ptr<VoicebotCall>> calls_;
     std::mutex mutex_;
 };

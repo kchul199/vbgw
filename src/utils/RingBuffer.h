@@ -1,16 +1,24 @@
 #pragma once
-#include <vector>
-#include <mutex>
 #include <algorithm>
 #include <cstring>
+#include <mutex>
+#include <stdexcept>
+#include <vector>
 
 // Thread-safe RingBuffer (FIFO, Byte-level)
 // write/read는 두 번의 memcpy로 wrap-around를 처리하여 CPU 낭비 최소화
-class RingBuffer {
+class RingBuffer
+{
 public:
-    RingBuffer(size_t size) : buffer_(size), head_(0), tail_(0), count_(0) {}
+    // [Phase3-M3 Fix] size=0 생성 시 modulo-by-zero UB 방지
+    explicit RingBuffer(size_t size) : buffer_(size), head_(0), tail_(0), count_(0)
+    {
+        if (size == 0)
+            throw std::invalid_argument("RingBuffer: size must be > 0");
+    }
 
-    void write(const uint8_t* data, size_t len) {
+    void write(const uint8_t* data, size_t len)
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         // 버퍼 용량보다 큰 데이터 쓰기: 오래된 데이터를 덮어씀
         if (len > buffer_.size()) {
@@ -36,10 +44,12 @@ public:
         count_ += len;
     }
 
-    size_t read(uint8_t* data, size_t len) {
+    size_t read(uint8_t* data, size_t len)
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         size_t available = std::min(len, count_);
-        if (available == 0) return 0;
+        if (available == 0)
+            return 0;
 
         // Wrap-around 구간을 두 번의 memcpy로 처리
         size_t first = std::min(available, buffer_.size() - head_);
@@ -52,14 +62,16 @@ public:
         return available;
     }
 
-    void clear() {
+    void clear()
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         head_ = 0;
         tail_ = 0;
         count_ = 0;
     }
 
-    size_t size() const {
+    size_t size() const
+    {
         std::lock_guard<std::mutex> lock(mutex_);
         return count_;
     }

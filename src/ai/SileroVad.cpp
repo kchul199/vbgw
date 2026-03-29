@@ -1,11 +1,14 @@
 #include "SileroVad.h"
+
 #include <onnxruntime_cxx_api.h>
-#include <iostream>
-#include <stdexcept>
+#include <spdlog/spdlog.h>
+
 #include <cstring>
 #include <filesystem>
+#include <stdexcept>
 
-struct SileroVad::Impl {
+struct SileroVad::Impl
+{
     Ort::Env env{ORT_LOGGING_LEVEL_WARNING, "SileroVAD"};
     Ort::SessionOptions session_options;
     std::unique_ptr<Ort::Session> session;
@@ -16,12 +19,13 @@ struct SileroVad::Impl {
     std::vector<float> c_state;
     std::vector<float> input_tensor_values;
     int64_t sr = 16000;
-    
+
     // ONNX 노드 이름
     std::vector<const char*> input_node_names = {"input", "sr", "h", "c"};
     std::vector<const char*> output_node_names = {"output", "hn", "cn"};
 
-    Impl(const std::string& model_path) {
+    Impl(const std::string& model_path)
+    {
         if (!std::filesystem::exists(model_path)) {
             throw std::runtime_error("Silero VAD 모델을 찾을 수 없습니다: " + model_path);
         }
@@ -33,63 +37,102 @@ struct SileroVad::Impl {
         resetStates();
     }
 
-    void resetStates() {
+    void resetStates()
+    {
         h_state.assign(2 * 1 * 64, 0.0f);
         c_state.assign(2 * 1 * 64, 0.0f);
     }
 };
 
-SileroVad::SileroVad() : pimpl_(new Impl("models/silero_vad.onnx")) {}
+SileroVad::SileroVad()
+{
+    // [M-5 Fix] 모델 경로를 환경변수에서 읽음 — 컨테이너 환경 유연성 확보
+    const char* model_path_env = std::getenv("SILERO_VAD_MODEL_PATH");
+    std::string model_path = model_path_env ? model_path_env : "models/silero_vad.onnx";
+    spdlog::info("[VAD] Loading Silero VAD model from: {}", model_path);
+    pimpl_ = std::make_unique<Impl>(model_path);
+}
 SileroVad::~SileroVad() = default;
 
-void SileroVad::resetState() {
+void SileroVad::resetState()
+{
+    // [M-5 Fix] resetState()도 mutex 보호 — 통화 종료/재시작 경합 방지
+    std::lock_guard<std::mutex> lock(vad_mutex_);
     pimpl_->resetStates();
+    last_speaking_state_ = false;
+    pcm_buffer_.clear();
+    pcm_head_ = 0;
 }
 
-bool SileroVad::isSpeaking(const std::vector<int16_t>& pcm, float threshold) {
-    if (pcm.empty()) return last_speaking_state_;
+bool SileroVad::isSpeaking(const std::vector<int16_t>& pcm, float threshold)
+{
+    std::lock_guard<std::mutex> lock(vad_mutex_);
+    if (pcm.empty())
+        return last_speaking_state_;
+    return isSpeakingImpl(pcm.data(), pcm.size(), threshold);
+}
 
-    // 지속적으로 512 샘플 단위(32ms)가 모였을 때만 ONNX 추론 실행
-    pcm_buffer_.insert(pcm_buffer_.end(), pcm.begin(), pcm.end());
-    
-    // 512 샘플 길이 미만이면 마지막 상태(이전 결과) 유지 반환
-    if (pcm_buffer_.size() < 512) {
+bool SileroVad::isSpeaking(const int16_t* data, size_t count, float threshold)
+{
+    // [P-1 Fix] 포인터 오버로드 — 호출측 벡터 복사 없이 직접 처리
+    std::lock_guard<std::mutex> lock(vad_mutex_);
+    if (!data || count == 0)
+        return last_speaking_state_;
+    return isSpeakingImpl(data, count, threshold);
+}
+
+bool SileroVad::isSpeakingImpl(const int16_t* data, size_t count, float threshold)
+{
+    // vad_mutex_ 보유 가정
+    pcm_buffer_.insert(pcm_buffer_.end(), data, data + count);
+
+    // 512 샘플(32ms) 미만이면 마지막 상태 유지
+    if ((pcm_buffer_.size() - pcm_head_) < 512) {
         return last_speaking_state_;
     }
-    
-    // 딱 512개만 잘라서 Inference 수행
-    std::vector<int16_t> chunk(pcm_buffer_.begin(), pcm_buffer_.begin() + 512);
-    pcm_buffer_.erase(pcm_buffer_.begin(), pcm_buffer_.begin() + 512);
+
+    // [P-1 Fix] chunk 벡터 복사 제거 — 버퍼 내 포인터 직접 참조
+    const int16_t* chunk_ptr = pcm_buffer_.data() + pcm_head_;
+    pcm_head_ += 512;
 
     // 16비트 PCM 정수를 float32(-1.0 ~ 1.0) 텐서 포맷으로 정규화 변환
-    pimpl_->input_tensor_values.resize(chunk.size());
-    for (size_t i = 0; i < chunk.size(); ++i) {
-        pimpl_->input_tensor_values[i] = static_cast<float>(chunk[i]) / 32768.0f;
+    // input_tensor_values는 Impl에 미리 할당 — 반복 heap alloc 없음
+    pimpl_->input_tensor_values.resize(512);
+    for (size_t i = 0; i < 512; ++i) {
+        pimpl_->input_tensor_values[i] = static_cast<float>(chunk_ptr[i]) / 32768.0f;
+    }
+
+    // [P-1 Fix] 주기적 compact — 1024 offset마다 한 번 (빈번한 O(N) erase 제거)
+    // float 변환 완료 후 compact해야 chunk_ptr 무효화 방지
+    if (pcm_head_ >= 1024) {
+        pcm_buffer_.erase(pcm_buffer_.begin(),
+                          pcm_buffer_.begin() + static_cast<std::ptrdiff_t>(pcm_head_));
+        pcm_head_ = 0;
     }
 
     auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
-    // 1. input tensor (1, pcm_len)
-    std::vector<int64_t> input_shape = {1, static_cast<int64_t>(chunk.size())};
-    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-        memory_info, pimpl_->input_tensor_values.data(), pimpl_->input_tensor_values.size(),
-        input_shape.data(), input_shape.size());
+    // 1. input tensor (1, 512)
+    std::vector<int64_t> input_shape = {1, 512};
+    Ort::Value input_tensor =
+        Ort::Value::CreateTensor<float>(memory_info, pimpl_->input_tensor_values.data(), 512,
+                                        input_shape.data(), input_shape.size());
 
     // 2. sr tensor (1)
     std::vector<int64_t> sr_shape = {1};
-    Ort::Value sr_tensor = Ort::Value::CreateTensor<int64_t>(
-        memory_info, &pimpl_->sr, 1, sr_shape.data(), sr_shape.size());
+    Ort::Value sr_tensor = Ort::Value::CreateTensor<int64_t>(memory_info, &pimpl_->sr, 1,
+                                                             sr_shape.data(), sr_shape.size());
 
     // 3. h_state tensor (2, 1, 64)
     std::vector<int64_t> state_shape = {2, 1, 64};
-    Ort::Value h_tensor = Ort::Value::CreateTensor<float>(
-        memory_info, pimpl_->h_state.data(), pimpl_->h_state.size(),
-        state_shape.data(), state_shape.size());
+    Ort::Value h_tensor =
+        Ort::Value::CreateTensor<float>(memory_info, pimpl_->h_state.data(), pimpl_->h_state.size(),
+                                        state_shape.data(), state_shape.size());
 
     // 4. c_state tensor (2, 1, 64)
-    Ort::Value c_tensor = Ort::Value::CreateTensor<float>(
-        memory_info, pimpl_->c_state.data(), pimpl_->c_state.size(),
-        state_shape.data(), state_shape.size());
+    Ort::Value c_tensor =
+        Ort::Value::CreateTensor<float>(memory_info, pimpl_->c_state.data(), pimpl_->c_state.size(),
+                                        state_shape.data(), state_shape.size());
 
     std::vector<Ort::Value> inputs;
     inputs.push_back(std::move(input_tensor));
@@ -97,23 +140,26 @@ bool SileroVad::isSpeaking(const std::vector<int16_t>& pcm, float threshold) {
     inputs.push_back(std::move(h_tensor));
     inputs.push_back(std::move(c_tensor));
 
-    // 모델 추론 실행 (Inference)
-    auto output_tensors = pimpl_->session->Run(
-        Ort::RunOptions{nullptr}, 
-        pimpl_->input_node_names.data(), 
-        inputs.data(), inputs.size(), 
-        pimpl_->output_node_names.data(), 3);
+    // [Phase2-H2 Fix] ONNX Run() 예외 처리 — 미처리 시 PJSIP 콜백 스레드 크래시
+    try {
+        auto output_tensors =
+            pimpl_->session->Run(Ort::RunOptions{nullptr}, pimpl_->input_node_names.data(),
+                                 inputs.data(), inputs.size(), pimpl_->output_node_names.data(), 3);
 
-    // 내부 상태(h, c) 업데이트 복사
-    float* hn = output_tensors[1].GetTensorMutableData<float>();
-    std::memcpy(pimpl_->h_state.data(), hn, pimpl_->h_state.size() * sizeof(float));
+        // 내부 상태(h, c) 업데이트 복사
+        float* hn = output_tensors[1].GetTensorMutableData<float>();
+        std::memcpy(pimpl_->h_state.data(), hn, pimpl_->h_state.size() * sizeof(float));
 
-    float* cn = output_tensors[2].GetTensorMutableData<float>();
-    std::memcpy(pimpl_->c_state.data(), cn, pimpl_->c_state.size() * sizeof(float));
+        float* cn = output_tensors[2].GetTensorMutableData<float>();
+        std::memcpy(pimpl_->c_state.data(), cn, pimpl_->c_state.size() * sizeof(float));
 
-    // 결과 점수 획득
-    float* output = output_tensors[0].GetTensorMutableData<float>();
-    last_speaking_state_ = output[0] > threshold;
-    
+        // 결과 점수 획득
+        float* output = output_tensors[0].GetTensorMutableData<float>();
+        last_speaking_state_ = output[0] > threshold;
+    } catch (const Ort::Exception& e) {
+        // 추론 실패 시 마지막 상태 유지 — 연속 통화 안정성 우선
+        spdlog::error("[VAD] ONNX inference error: {} — returning last state", e.what());
+    }
+
     return last_speaking_state_;
 }

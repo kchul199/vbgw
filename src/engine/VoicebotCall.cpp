@@ -1,83 +1,154 @@
-#include <spdlog/spdlog.h>
 #include "VoicebotCall.h"
-#include "VoicebotMediaPort.h"
-#include "SessionManager.h"
+
 #include "../ai/VoicebotAiClient.h"
-#include <grpcpp/grpcpp.h>
+#include "../utils/AppConfig.h"
+#include "SessionManager.h"
+#include "VoicebotMediaPort.h"
 
-using namespace pj;
+#include <spdlog/spdlog.h>
 
-VoicebotCall::VoicebotCall(Account &acc, int call_id)
-    : Call(acc, call_id), media_port_(nullptr), ai_client_(nullptr) {}
+#include <chrono>
+#include <random>
+#include <sstream>
 
-// unique_ptr<VoicebotMediaPort> 소멸자는 완전한 타입이 필요하므로 .cpp에서 정의
-VoicebotCall::~VoicebotCall() {}
+// [M-9 Fix] UUID v4 생성기 — 분산 환경에서 세션 추적 가능
+static std::string generateSessionId()
+{
+    static thread_local std::mt19937 gen(
+        static_cast<unsigned>(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::uniform_int_distribution<uint32_t> dist(0, 0xFFFFFFFF);
 
-void VoicebotCall::onCallState(OnCallStateParam &prm) {
-    CallInfo ci = getInfo();
-    spdlog::info("[Call] ID={} State={} Reason={}", ci.id, ci.stateText, ci.lastReason);
+    // 간이 UUID v4: xxxxxxxx-xxxx-xxxx-xxxx
+    std::ostringstream oss;
+    oss << std::hex;
+    oss << dist(gen) << "-";
+    oss << (dist(gen) & 0xFFFF) << "-";
+    oss << (dist(gen) & 0xFFFF) << "-";
+    oss << (dist(gen) & 0xFFFF);
+    return oss.str();
+}
+
+VoicebotCall::VoicebotCall(pj::Account& acc, int call_id)
+    : pj::Call(acc, call_id), media_port_(nullptr), ai_client_(nullptr)
+{}
+
+VoicebotCall::~VoicebotCall()
+{
+    // ai_client_ endSession은 소멸자 호출 전 onCallState(DISCONNECTED)에서
+    // SessionManager::removeCall()을 통해 shared_ptr refcount가 0이 되면 자동 수행됨
+}
+
+void VoicebotCall::onCallState(pj::OnCallStateParam& prm)
+{
+    pj::CallInfo ci = getInfo();
+    spdlog::info("[Call] ID={} Session={} State={} Reason={}", ci.id, session_id_, ci.stateText,
+                 ci.lastReason);
 
     if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
-        // unique_ptr이 있으므로 media_port_ 는 자동 해제됨
         SessionManager::getInstance().removeCall(ci.id);
-        spdlog::info("[Call] ID={} Removed from SessionManager.", ci.id);
+        spdlog::info("[Call] ID={} Session={} Removed from SessionManager.", ci.id, session_id_);
     }
 }
 
-void VoicebotCall::onCallMediaState(OnCallMediaStateParam &prm) {
-    CallInfo ci = getInfo();
-    for (unsigned i = 0; i < ci.media.size(); ++i) {
-        if (ci.media[i].type == PJMEDIA_TYPE_AUDIO && getMedia(i)) {
-            AudioMedia *aud_med = (AudioMedia *)getMedia(i);
-            
-            // [P2 Fix] AI 엔진 주소를 환경 변수로 외부화 (기본값: localhost:50051)
-            if (!ai_client_) {
-                const char* ai_addr_env = std::getenv("AI_ENGINE_ADDR");
-                std::string ai_addr = ai_addr_env ? ai_addr_env : "localhost:50051";
-                spdlog::info("[Call] Connecting to AI Engine at: {}", ai_addr);
+void VoicebotCall::onCallMediaState(pj::OnCallMediaStateParam& prm)
+{
+    pj::CallInfo ci = getInfo();
+    const auto& cfg = AppConfig::instance();
 
-                auto channel = grpc::CreateChannel(ai_addr, grpc::InsecureChannelCredentials());
-                ai_client_ = std::make_shared<VoicebotAiClient>(channel);
-                
-                ai_client_->setTtsCallback([this](const uint8_t* data, size_t len) {
-                    if (media_port_) {
-                        media_port_->writeTtsAudio(data, len);
+    for (unsigned i = 0; i < ci.media.size(); ++i) {
+        if (ci.media[i].type != PJMEDIA_TYPE_AUDIO)
+            continue;
+
+        pj::AudioMedia* aud_med = dynamic_cast<pj::AudioMedia*>(getMedia(i));
+        if (!aud_med)
+            continue;
+
+        bool needs_hangup = false;
+        {
+            std::lock_guard<std::mutex> lock(ai_init_mutex_);
+
+            if (!ai_client_) {
+                // [CR-1 Fix] gRPC 채널을 AppConfig 싱글톤에서 공유
+                // 매 콜마다 TCP + HTTP/2 + TLS 핸드셰이크 비용 제거
+                // AI_ENGINE_ADDR 검증도 AppConfig 생성 시 1회만 수행
+                spdlog::info("[Call] Connecting to AI Engine at: {}", cfg.ai_engine_addr);
+
+                try {
+                    auto channel = cfg.getGrpcChannel();
+                    ai_client_ = std::make_shared<VoicebotAiClient>(channel);
+                } catch (const std::runtime_error& e) {
+                    spdlog::critical("[Call] gRPC channel creation failed: {} — hanging up",
+                                     e.what());
+                    needs_hangup = true;
+                }
+
+                if (!needs_hangup) {
+                    if (!cfg.grpc_use_tls) {
+                        spdlog::warn(
+                            "[Call] gRPC using INSECURE channel — GRPC_USE_TLS=1 is REQUIRED "
+                            "for production");
                     }
-                });
-                
-                ai_client_->setTtsClearCallback([this]() {
-                    if (media_port_) {
-                        media_port_->clearTtsAudio();
-                        media_port_->resetVad();
-                    }
-                });
-                
-                ai_client_->setErrorCallback([this](const std::string& err) {
-                    spdlog::error("🚨 [Call] Hanging up due to permanent AI Error: {}", err);
-                    try {
-                        pj::CallOpParam prm;
-                        prm.statusCode = PJSIP_SC_SERVICE_UNAVAILABLE;
-                        hangup(prm);
-                    } catch (const pj::Error& e) {
-                        spdlog::warn("[Call] Error during hangup: {}", e.info());
-                    }
-                });
-                
-                char session_id_str[32];
-                snprintf(session_id_str, sizeof(session_id_str), "%d", getInfo().id);
-                ai_client_->startSession(session_id_str);
+
+                    // [M-1 Fix] this 캡처 → weak_from_this() 캡처
+                    // AI 클라이언트의 read 스레드가 아직 실행 중일 때
+                    // VoicebotCall이 먼저 소멸하면 dangling 접근 발생 방지
+                    auto weak_self = weak_from_this();
+
+                    ai_client_->setTtsCallback([weak_self](const uint8_t* data, size_t len) {
+                        if (auto self = weak_self.lock()) {
+                            if (self->media_port_) {
+                                self->media_port_->writeTtsAudio(data, len);
+                            }
+                        }
+                    });
+
+                    ai_client_->setTtsClearCallback([weak_self]() {
+                        if (auto self = weak_self.lock()) {
+                            if (self->media_port_) {
+                                self->media_port_->clearTtsAudio();
+                                self->media_port_->resetVad();
+                            }
+                        }
+                    });
+
+                    ai_client_->setErrorCallback([weak_self](const std::string& err) {
+                        spdlog::error("🚨 [Call] Hanging up due to permanent AI Error: {}", err);
+                        if (auto self = weak_self.lock()) {
+                            try {
+                                pj::CallOpParam prm;
+                                prm.statusCode = PJSIP_SC_SERVICE_UNAVAILABLE;
+                                self->hangup(prm);
+                            } catch (const pj::Error& e) {
+                                spdlog::warn("[Call] Error during hangup: {}", e.info());
+                            }
+                        }
+                    });
+
+                    // [M-9 Fix] UUID 기반 세션 ID 생성
+                    session_id_ = generateSessionId();
+                    ai_client_->startSession(session_id_);
+                }
             }
 
-            // [P1 Fix] unique_ptr로 자동 메모리 관리
-            if (!media_port_) {
+            if (!needs_hangup && !media_port_) {
                 media_port_ = std::make_unique<VoicebotMediaPort>();
                 media_port_->setAiClient(ai_client_);
             }
-            
-            aud_med->startTransmit(*media_port_);
-            media_port_->startTransmit(*aud_med);
-            
-            spdlog::info("[Call] AI Media Port connected. RTP Stream converting to PCM.");
+        }  // ai_init_mutex_ released
+
+        if (needs_hangup) {
+            try {
+                pj::CallOpParam hangup_prm;
+                hangup_prm.statusCode = PJSIP_SC_SERVICE_UNAVAILABLE;
+                hangup(hangup_prm);
+            } catch (...) {}
+            return;
         }
+
+        aud_med->startTransmit(*media_port_);
+        media_port_->startTransmit(*aud_med);
+
+        spdlog::info("[Call] AI Media Port connected. Session={} RTP Stream converting to PCM.",
+                     session_id_);
     }
 }
