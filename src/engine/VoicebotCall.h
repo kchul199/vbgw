@@ -1,6 +1,7 @@
 #pragma once
 #include <pjsua2.hpp>
 
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -18,6 +19,7 @@ public:
 
     virtual void onCallState(pj::OnCallStateParam& prm) override;
     virtual void onCallMediaState(pj::OnCallMediaStateParam& prm) override;
+    virtual void onDtmfDigit(pj::OnDtmfDigitParam& prm) override;  // [E-3] IVR 레이어
 
 private:
     std::unique_ptr<VoicebotMediaPort> media_port_;
@@ -28,4 +30,11 @@ private:
 
     // [M-9 Fix] UUID 기반 세션 ID — 분산 환경에서 로그 추적 가능
     std::string session_id_;
+
+    // [E-1] CDR (Call Detail Record) 생성을 위한 생애주기 메트릭
+    std::chrono::system_clock::time_point start_time_;
+    std::atomic<int> vad_trigger_count_{0};
+    std::atomic<int> bargein_count_{0};
+
+    void dumpCdr(const std::string& reason);
 };

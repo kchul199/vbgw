@@ -91,3 +91,11 @@ void VoicebotEndpoint::shutdown()
         spdlog::error("[Endpoint] Shutdown error: {}", err.info());
     }
 }
+
+void VoicebotEndpoint::setCodecPriority(const std::string& codec_id, short priority)
+{
+    if (ep_) {
+        // PJSIP의 pj_str_t 사용으로 캐스팅
+        ep_->codecSetPriority(codec_id, priority);
+    }
+}

@@ -30,7 +30,9 @@ static std::string generateSessionId()
 
 VoicebotCall::VoicebotCall(pj::Account& acc, int call_id)
     : pj::Call(acc, call_id), media_port_(nullptr), ai_client_(nullptr)
-{}
+{
+    start_time_ = std::chrono::system_clock::now();
+}
 
 VoicebotCall::~VoicebotCall()
 {
@@ -45,6 +47,7 @@ void VoicebotCall::onCallState(pj::OnCallStateParam& prm)
                  ci.lastReason);
 
     if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
+        dumpCdr(ci.lastReason);
         SessionManager::getInstance().removeCall(ci.id);
         spdlog::info("[Call] ID={} Session={} Removed from SessionManager.", ci.id, session_id_);
     }
@@ -151,4 +154,31 @@ void VoicebotCall::onCallMediaState(pj::OnCallMediaStateParam& prm)
         spdlog::info("[Call] AI Media Port connected. Session={} RTP Stream converting to PCM.",
                      session_id_);
     }
+}
+
+void VoicebotCall::onDtmfDigit(pj::OnDtmfDigitParam& prm)
+{
+    spdlog::info("[IVR] Session={} Received DTMF digit: {}", session_id_, prm.digit);
+    // 향후 IVR 메뉴 전환 및 AI 엔진 우회 전송 로직 구현 지점
+}
+
+void VoicebotCall::dumpCdr(const std::string& reason)
+{
+    auto end_time = std::chrono::system_clock::now();
+    auto duration =
+        std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time_).count();
+
+    // 타임스탬프 포맷팅
+    std::time_t end_time_t = std::chrono::system_clock::to_time_t(end_time);
+    char buf[64];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&end_time_t));
+
+    // [E-1 Fix] 운영 및 과금 목적의 CDR 구조화 로깅
+    spdlog::info("[CDR] {{\"session_id\":\"{}\", "
+                 "\"end_time\":\"{}\", "
+                 "\"duration_sec\":{}, \"reason\":\"{}\", "
+                 "\"vad_triggers\":{}, \"bargeins\":{}}}",
+                 session_id_.empty() ? "N/A" : session_id_, buf, duration,
+                 reason.empty() ? "Unknown" : reason, vad_trigger_count_.load(),
+                 bargein_count_.load());
 }

@@ -7,6 +7,12 @@
 
 ## 2026-03-29
 
+- `[d8c57b8]` **build: CMake 멀티플랫폼 대응 및 docs 현행화** — 2026-03-29 22:29 (3 파일, +28/-9)
+  - 변경: CMakeLists.txt,docs/architecture.md,docs/troubleshooting.md
+- `[5e3f664]` **docs: 아키텍처 리뷰 보고서 추가** — 2026-03-29 22:12 (1 파일, +649/-0)
+  - 변경: docs/code_review_report.md
+- `[ea3728b]` **chore: 저장소 정리 및 개발 이력 업데이트** — 2026-03-29 22:10 (42 파일, +12/-10696)
+  - 변경: .cache/clangd/index/SileroVad.cpp.8F7964E92BC49AED.idx,.cache/clangd/index/SileroVad.h.9DBB45CB0AEEF5A8.idx,.cache/clangd/index/VoicebotAccount.cpp.B6EFA9DB5817B1A0.idx,.cache/clangd/index/VoicebotAccount.h.D876F23E07DAEE4B.idx,.cache/clangd/index/VoicebotAiClient.cpp.0175DC5F1297F6E4.idx,.cache/clangd/index/VoicebotAiClient.h.A5DDB2D3888C3675.idx,.cache/clangd/index/VoicebotCall.cpp.D9B50BB8CED1AA2D.idx,.cache/clangd/index/VoicebotCall.h.45881163B75E250F.idx,.cache/clangd/index/VoicebotEndpoint.cpp.7696CA2B6A8E1BA5.idx,.cache/clangd/index/VoicebotEndpoint.h.8F0802F91652FBFC.idx
 - `[5774726]` **refactor: 아키텍처 리뷰 Critical~Low 20건 이슈 개선** — 2026-03-29 22:08 (25 파일, +2013/-433)
   - 변경: .clang-format,.gitignore,CLAUDE.md,Dockerfile,docs/architecture.md,docs/testing.md,protos/voicebot.proto,src/ai/SileroVad.cpp,src/ai/SileroVad.h,src/ai/VoicebotAiClient.cpp
 ## 2026-03-22

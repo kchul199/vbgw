@@ -1,3 +1,4 @@
+#include "api/HttpServer.h"
 #include "engine/SessionManager.h"
 #include "engine/VoicebotAccount.h"
 #include "engine/VoicebotEndpoint.h"
@@ -13,7 +14,6 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
-#include <iostream>
 #include <thread>
 
 // 전역 종료 플래그 (SIGINT 등 인터럽트 기반 안전 종료 대기용)
@@ -72,15 +72,40 @@ int main()
         return 1;
     }
 
+    // [E-4 Fix] 광대역 HD Voice 코덱(Opus, G.722) 우선순위 상향
+    try {
+        ep.setCodecPriority("opus/48000/2", 255);
+        ep.setCodecPriority("opus/48000/1", 254);
+        ep.setCodecPriority("G722/16000/1", 253);
+        spdlog::info("[VBGW] Codec priorities updated (Opus/G722 preferred)");
+    } catch (pj::Error& err) {
+        spdlog::warn("[VBGW] Some codecs not found, skipping priority update: {}", err.info());
+    }
+
     if (!ep.start(cfg.sip_port)) {
         return 1;
     }
 
     pj::AccountConfig acc_cfg;
 
+    // [CR-3 Fix] SRTP 활성화
+    if (cfg.srtp_enable) {
+        acc_cfg.mediaConfig.srtpUse = PJMEDIA_SRTP_OPTIONAL;
+        acc_cfg.mediaConfig.srtpSecureSignaling = 0;  // SIP-TLS 사용 시 1 지정 권장
+        spdlog::info("[VBGW] SRTP (Secure RTP) is ENABLED");
+    }
+
+    // [H-1 Fix] 고정 RTP 포트 범위 설정
+    acc_cfg.mediaConfig.transportConfig.portRange = cfg.rtp_port_max - cfg.rtp_port_min;
+    acc_cfg.mediaConfig.transportConfig.port = cfg.rtp_port_min;
+
     if (cfg.pbx_mode) {
         acc_cfg.idUri = cfg.pbx_id_uri;
         acc_cfg.regConfig.registrarUri = cfg.pbx_uri;
+
+        // [M-3 Fix] PBX 등록 끊김 시 PJSIP 자동 재등록 시도 간격(초)
+        acc_cfg.regConfig.retryIntervalSec = 60;
+
         acc_cfg.sipConfig.authCreds.push_back(
             pj::AuthCredInfo("digest", "*", cfg.pbx_username, 0, cfg.pbx_password));
         spdlog::info("[VBGW] PBX Registration Mode Enabled.");
@@ -99,6 +124,11 @@ int main()
     } catch (pj::Error& err) {
         spdlog::error("Error creating account: {}", err.info());
         return 1;
+    }
+
+    // [H-4, H-5, E-2 Fix] 내장 관리 서버 시작
+    if (!HttpServer::getInstance().start(cfg.http_port)) {
+        spdlog::error("[VBGW] Failed to start HTTP Admin Server on port {}", cfg.http_port);
     }
 
     spdlog::info("Press Ctrl+C to stop the gateway gracefully.");
@@ -130,6 +160,9 @@ int main()
     // 3. PJSIP 엔진 완벽히 내리기
     spdlog::info("[Shutdown 3/3] Shutting down PJLIB...");
     ep.shutdown();
+
+    // HTTP Server 종료
+    HttpServer::getInstance().stop();
 
     spdlog::info("Gateway shutdown complete. Goodbye!");
     return 0;

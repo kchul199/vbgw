@@ -13,6 +13,9 @@ public:
     bool start(int sip_port);
     void shutdown();
 
+    // [E-4] 코덱 우선순위 변경
+    void setCodecPriority(const std::string& codec_id, short priority);
+
 private:
     std::unique_ptr<pj::Endpoint> ep_;
 };

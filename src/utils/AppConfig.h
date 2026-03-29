@@ -25,6 +25,7 @@ public:
     // ── SIP 설정 ──
     int sip_port;
     bool sip_use_tls;
+    bool srtp_enable;
     std::string sip_tls_cert_file;
     std::string sip_tls_privkey_file;
     std::string sip_tls_ca_file;
@@ -56,6 +57,9 @@ public:
     int rtp_port_min;
     int rtp_port_max;
 
+    // ── 모니터링 / API 서버 ──
+    int http_port;
+
     // ── 로깅 설정 ──
     std::string log_level;
     std::string log_dir;
@@ -81,6 +85,7 @@ private:
         // ── SIP ──
         sip_port = readInt("SIP_PORT", 5060, 1, 65535);
         sip_use_tls = readBool("SIP_USE_TLS", false);
+        srtp_enable = readBool("SRTP_ENABLE", false);
         sip_tls_cert_file = readStr("SIP_TLS_CERT_FILE", "");
         sip_tls_privkey_file = readStr("SIP_TLS_PRIVKEY_FILE", "");
         sip_tls_ca_file = readStr("SIP_TLS_CA_FILE", "");
@@ -125,6 +130,9 @@ private:
         log_level = readStr("LOG_LEVEL", "info");
         log_dir = readStr("LOG_DIR", "");
         pjsip_log_level = readInt("PJSIP_LOG_LEVEL", 3, 0, 6);
+
+        // ── API Server ──
+        http_port = readInt("HTTP_PORT", 8080, 1, 65535);
     }
 
     ~AppConfig() = default;
