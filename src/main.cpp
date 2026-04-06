@@ -54,9 +54,9 @@ int main()
 
     if (!cfg.log_dir.empty()) {
         std::filesystem::create_directories(cfg.log_dir);
+        // daily_file_sink_mt creates files like vbgw_YYYY-MM-DD.log and rotates at 00:00 midnight
         std::string log_path = cfg.log_dir + "/vbgw.log";
-        auto file_sink =
-            std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_path, 10 * 1024 * 1024, 5);
+        auto file_sink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(log_path, 0, 0);
         file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [%t] %v");
         sinks.push_back(file_sink);
     }
@@ -103,8 +103,13 @@ int main()
     // [CR-3 Fix] SRTP 활성화
     if (cfg.srtp_enable) {
         acc_cfg.mediaConfig.srtpUse = PJMEDIA_SRTP_OPTIONAL;
-        acc_cfg.mediaConfig.srtpSecureSignaling = 0;  // SIP-TLS 사용 시 1 지정 권장
+        acc_cfg.mediaConfig.srtpSecureSignaling = cfg.sip_use_tls ? 1 : 0;
         spdlog::info("[VBGW] SRTP (Secure RTP) is ENABLED");
+        if (cfg.sip_use_tls) {
+            spdlog::info("       - SRTP requires Secure Signaling (SIP-TLS)");
+        } else {
+            spdlog::warn("       - SRTP over UDP (Not recommended for Production)");
+        }
     }
 
     // [H-1 Fix] 고정 RTP 포트 범위 설정
@@ -115,16 +120,22 @@ int main()
         RuntimeMetrics::instance().setSipMode(true);
 
         acc_cfg.idUri = cfg.pbx_id_uri;
-        acc_cfg.regConfig.registrarUri = cfg.pbx_uri;
 
-        // [M-3 Fix] PBX 등록 끊김 시 PJSIP 자동 재등록 시도 간격(초)
-        acc_cfg.regConfig.retryIntervalSec = 60;
+        if (cfg.sip_register_enable) {
+            acc_cfg.regConfig.registrarUri = cfg.pbx_uri;
+            // [M-3 Fix] PBX 등록 끊김 시 PJSIP 자동 재등록 시도 간격(초)
+            acc_cfg.regConfig.retryIntervalSec = 60;
+            spdlog::info("[VBGW] PBX Registration Mode Enabled.");
+            spdlog::info("       - Registrar: {}", cfg.pbx_uri);
+        } else {
+            spdlog::info("[VBGW] SBC Trunk Mode Enabled (No Registration).");
+            spdlog::info("       - Trunk IP expected at: {}", cfg.pbx_uri);
+        }
+
+        spdlog::info("       - ID URI: {}", cfg.pbx_id_uri);
 
         acc_cfg.sipConfig.authCreds.push_back(
             pj::AuthCredInfo("digest", "*", cfg.pbx_username, 0, cfg.pbx_password));
-        spdlog::info("[VBGW] PBX Registration Mode Enabled.");
-        spdlog::info("       - Registrar: {}", cfg.pbx_uri);
-        spdlog::info("       - ID URI: {}", cfg.pbx_id_uri);
     } else {
         RuntimeMetrics::instance().setSipMode(false);
         RuntimeMetrics::instance().setSipRegistration(true, 200);

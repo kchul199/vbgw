@@ -67,7 +67,7 @@ USER vbgw
 EXPOSE 5060/udp
 
 # RTP 미디어 포트 범위 (필요 시 조정)
-EXPOSE 16000-16100/udp
+EXPOSE 16000-20000/udp
 
 # [S-4 Fix] HTTP 기반 헬스체크로 변경 — 프로세스 좀비/교착 상태도 감지
 # pgrep은 프로세스 존재만 확인하여 deadlock 상태를 놓칠 수 있음
@@ -83,7 +83,7 @@ ENV LOG_LEVEL=info \
     SIP_PORT=5060 \
     SIP_USE_TLS=0 \
     RTP_PORT_MIN=16000 \
-    RTP_PORT_MAX=16100 \
+    RTP_PORT_MAX=20000 \
     AI_ENGINE_ADDR=localhost:50051 \
     GRPC_USE_TLS=0 \
     GRPC_STREAM_DEADLINE_SECS=86400 \

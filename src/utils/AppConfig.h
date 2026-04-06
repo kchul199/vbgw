@@ -39,7 +39,8 @@ public:
     std::string pbx_id_uri;
     std::string pbx_username;
     std::string pbx_password;
-    bool pbx_mode;  // 4개 모두 설정되었는지
+    bool pbx_mode;             // 4개 모두 설정되었는지
+    bool sip_register_enable;  // SBC Trunk 모드 스위치
 
     // ── AI 엔진 (gRPC) 설정 ──
     std::string ai_engine_addr;
@@ -179,6 +180,7 @@ private:
         pbx_password = readStr("PBX_PASSWORD", "");
         pbx_mode = !pbx_uri.empty() && !pbx_id_uri.empty() && !pbx_username.empty() &&
                    !pbx_password.empty();
+        sip_register_enable = readBool("SIP_REGISTER_ENABLE", true);
 
         // ── AI Engine (gRPC) ──
         ai_engine_addr = readStr("AI_ENGINE_ADDR", "localhost:50051");
@@ -203,7 +205,7 @@ private:
 
         // ── RTP Port Range ──
         rtp_port_min = readInt("RTP_PORT_MIN", 16000, 1024, 65535);
-        rtp_port_max = readInt("RTP_PORT_MAX", 16100, 1024, 65535);
+        rtp_port_max = readInt("RTP_PORT_MAX", 20000, 1024, 65535);
         if (rtp_port_max < rtp_port_min) {
             spdlog::warn("[Config] RTP_PORT_MAX({}) < RTP_PORT_MIN({}) — swapping", rtp_port_max,
                          rtp_port_min);
@@ -212,7 +214,7 @@ private:
 
         // ── Logging ──
         log_level = readStr("LOG_LEVEL", "info");
-        log_dir = readStr("LOG_DIR", "");
+        log_dir = readStr("LOG_DIR", "logs");
         pjsip_log_level = readInt("PJSIP_LOG_LEVEL", 3, 0, 6);
         pjsip_null_audio = readBool("PJSIP_NULL_AUDIO", false);
 
